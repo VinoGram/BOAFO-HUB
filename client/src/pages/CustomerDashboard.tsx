@@ -1,0 +1,193 @@
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { jobsApi, bookingsApi, categoriesApi } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
+import { useLocation } from "wouter";
+
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, [string, string]> = {
+    open: ["Open", "#ABC270"], in_progress: ["In Progress", "#FDA769"],
+    completed: ["Completed", "#8FA853"], cancelled: ["Cancelled", "#999"],
+    pending: ["Pending", "#FEC868"], accepted: ["Accepted", "#ABC270"],
+    declined: ["Declined", "#E05A3A"],
+  };
+  const [label, color] = map[status] || [status, "#999"];
+  return <span style={{ background: `${color}20`, border: `1px solid ${color}50`, color, borderRadius: 9999, padding: "2px 10px", fontSize: "0.72rem", fontWeight: 700 }}>{label}</span>;
+}
+
+function DashNav({ user, logout }: { user: any; logout: () => void }) {
+  const [, navigate] = useLocation();
+  return (
+    <nav style={{ background: "rgba(255,248,238,0.97)", backdropFilter: "blur(12px)", borderBottom: "1px solid #E8D9BF", position: "sticky", top: 0, zIndex: 100 }}>
+      <div className="container" style={{ display: "flex", alignItems: "center", height: 64, gap: "1rem" }}>
+        <a href="/" style={{ fontFamily: "'Moonwalk','Inter',sans-serif", fontSize: "1.3rem", fontWeight: 700, color: "#473C33", textDecoration: "none" }}>BOAFO</a>
+        <div style={{ flex: 1 }} />
+        <a href="/search" className="nav-link" style={{ fontSize: "0.875rem" }}>Browse</a>
+        <span style={{ fontSize: "0.875rem", color: "#6B5B4E" }}>{user?.name}</span>
+        <button className="btn-boafo btn-outline" style={{ padding: "0.4rem 1rem", fontSize: "0.8rem" }} onClick={logout}>Sign Out</button>
+      </div>
+    </nav>
+  );
+}
+
+export default function CustomerDashboard() {
+  const { user, logout } = useAuth({ redirectOnUnauthenticated: true });
+  const [tab, setTab] = useState("jobs");
+  const [showPostJob, setShowPostJob] = useState(false);
+  const [jobForm, setJobForm] = useState({ title: "", description: "", tradeCategoryId: "", budget: "", location: "" });
+  const [err, setErr] = useState("");
+  const qc = useQueryClient();
+
+  const { data: myJobs = [] } = useQuery({ queryKey: ["my-jobs"], queryFn: jobsApi.getByCustomer, enabled: tab === "jobs" });
+  const { data: myBookings = [] } = useQuery({ queryKey: ["my-bookings-customer"], queryFn: bookingsApi.getByCustomer, enabled: tab === "bookings" });
+  const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
+
+  const postJobMutation = useMutation({
+    mutationFn: (data: any) => jobsApi.create(data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["my-jobs"] }); setShowPostJob(false); setJobForm({ title: "", description: "", tradeCategoryId: "", budget: "", location: "" }); },
+    onError: (e: any) => setErr(e.message),
+  });
+
+  const completeBookingMutation = useMutation({
+    mutationFn: bookingsApi.complete,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["my-bookings-customer"] }),
+  });
+
+  const stats = {
+    active: (myJobs as any[]).filter((j: any) => j.status === "open").length,
+    inProgress: (myJobs as any[]).filter((j: any) => j.status === "in_progress").length,
+    completed: (myJobs as any[]).filter((j: any) => j.status === "completed").length,
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#FFF8EE", fontFamily: "'Inter',sans-serif" }}>
+      <DashNav user={user} logout={logout} />
+
+      <div className="container" style={{ padding: "2rem 1.25rem" }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "2rem", flexWrap: "wrap", gap: "1rem" }}>
+          <div>
+            <h1 style={{ fontSize: "1.75rem", fontWeight: 700, color: "#473C33", marginBottom: "0.25rem" }}>My Dashboard</h1>
+            <p style={{ color: "#6B5B4E", fontSize: "0.9rem" }}>Welcome back, {user?.name}</p>
+          </div>
+          <button className="btn-boafo btn-primary" onClick={() => setShowPostJob(true)}>+ Post New Job</button>
+        </div>
+
+        {/* Stats */}
+        <div className="grid-4" style={{ marginBottom: "2rem" }}>
+          {[["Active Jobs", stats.active, "#ABC270"], ["In Progress", stats.inProgress, "#FDA769"], ["Completed", stats.completed, "#8FA853"], ["Bookings", (myBookings as any[]).length, "#FEC868"]].map(([label, val, color]) => (
+            <div key={label as string} className="boafo-card" style={{ padding: "1.25rem" }}>
+              <p style={{ fontSize: "0.8rem", color: "#6B5B4E", marginBottom: "0.375rem" }}>{label as string}</p>
+              <p style={{ fontSize: "2rem", fontWeight: 800, color: color as string }}>{val as number}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Post Job Modal */}
+        {showPostJob && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(71,60,51,0.5)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+            <div style={{ background: "#fff", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}>
+              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#473C33", marginBottom: "1.5rem" }}>Post a New Job</h2>
+              <form onSubmit={(e) => { e.preventDefault(); setErr(""); postJobMutation.mutate({ ...jobForm, tradeCategoryId: Number(jobForm.tradeCategoryId), budget: jobForm.budget }); }} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div><label className="boafo-label">Job Title</label><input className="boafo-input" placeholder="e.g. Fix leaking kitchen pipe" value={jobForm.title} onChange={e => setJobForm(f => ({ ...f, title: e.target.value }))} required /></div>
+                <div><label className="boafo-label">Description</label><textarea className="boafo-input" rows={3} placeholder="Describe the problem in detail…" value={jobForm.description} onChange={e => setJobForm(f => ({ ...f, description: e.target.value }))} required style={{ resize: "none" }} /></div>
+                <div><label className="boafo-label">Trade Category</label>
+                  <select className="boafo-input" value={jobForm.tradeCategoryId} onChange={e => setJobForm(f => ({ ...f, tradeCategoryId: e.target.value }))} required>
+                    <option value="">Select category</option>
+                    {(categories as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: "0.75rem" }}>
+                  <div style={{ flex: 1 }}><label className="boafo-label">Budget (GH₵)</label><input className="boafo-input" type="number" placeholder="Optional" value={jobForm.budget} onChange={e => setJobForm(f => ({ ...f, budget: e.target.value }))} /></div>
+                  <div style={{ flex: 1 }}><label className="boafo-label">Location</label><input className="boafo-input" placeholder="City / area" value={jobForm.location} onChange={e => setJobForm(f => ({ ...f, location: e.target.value }))} /></div>
+                </div>
+                {err && <div style={{ color: "#C0392B", fontSize: "0.875rem", background: "rgba(224,90,58,0.08)", borderRadius: "0.625rem", padding: "0.625rem 0.875rem" }}>{err}</div>}
+                <div style={{ display: "flex", gap: "0.75rem" }}>
+                  <button type="submit" className="btn-boafo btn-primary" style={{ flex: 1, justifyContent: "center" }} disabled={postJobMutation.isPending}>{postJobMutation.isPending ? "Posting…" : "Post Job"}</button>
+                  <button type="button" className="btn-boafo btn-outline" style={{ flex: 1, justifyContent: "center" }} onClick={() => setShowPostJob(false)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div style={{ display: "flex", background: "#F5EDD8", borderRadius: "0.75rem", padding: 4, marginBottom: "1.5rem", width: "fit-content" }}>
+          {["jobs", "bookings"].map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              padding: "0.55rem 1.5rem", borderRadius: "0.6rem", border: "none", cursor: "pointer",
+              fontWeight: 600, fontSize: "0.875rem", transition: "all 0.2s", textTransform: "capitalize",
+              background: tab === t ? "#fff" : "transparent", color: tab === t ? "#473C33" : "#6B5B4E",
+              boxShadow: tab === t ? "0 2px 8px rgba(71,60,51,0.1)" : "none",
+            }}>{t === "jobs" ? "My Jobs" : "My Bookings"}</button>
+          ))}
+        </div>
+
+        {/* Jobs */}
+        {tab === "jobs" && (
+          (myJobs as any[]).length === 0 ? (
+            <div style={{ textAlign: "center", padding: "4rem 2rem" }}>
+              <p style={{ color: "#6B5B4E", marginBottom: "1rem" }}>No jobs posted yet.</p>
+              <button className="btn-boafo btn-primary" onClick={() => setShowPostJob(true)}>Post Your First Job</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {(myJobs as any[]).map((j: any) => (
+                <div key={j.id} className="boafo-card" style={{ padding: "1.5rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", gap: "0.625rem", alignItems: "center", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+                        <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "#473C33" }}>{j.title}</h3>
+                        <StatusBadge status={j.status} />
+                      </div>
+                      <p style={{ fontSize: "0.8rem", color: "#6B5B4E", marginBottom: "0.5rem" }}>{j.description?.slice(0, 100)}…</p>
+                      <div style={{ display: "flex", gap: "1rem", fontSize: "0.8rem", color: "#6B5B4E" }}>
+                        {j.budget && <span>GH₵ {j.budget}</span>}
+                        {j.location && <span>📍 {j.location}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
+                      <a href={`/job/${j.id}`} className="btn-boafo btn-primary" style={{ padding: "0.45rem 1rem", fontSize: "0.8rem" }}>View Bids</a>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {/* Bookings */}
+        {tab === "bookings" && (
+          (myBookings as any[]).length === 0 ? (
+            <div style={{ textAlign: "center", padding: "4rem 2rem" }}>
+              <p style={{ color: "#6B5B4E" }}>No bookings yet.</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {(myBookings as any[]).map((b: any) => (
+                <div key={b.id} className="boafo-card" style={{ padding: "1.5rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem" }}>
+                    <div>
+                      <div style={{ display: "flex", gap: "0.625rem", marginBottom: "0.5rem" }}>
+                        <h3 style={{ fontSize: "0.95rem", fontWeight: 700, color: "#473C33" }}>Booking #{b.id}</h3>
+                        <StatusBadge status={b.status} />
+                      </div>
+                      {b.quotedPrice && <p style={{ fontSize: "0.875rem", color: "#473C33", fontWeight: 600 }}>GH₵ {b.quotedPrice}</p>}
+                      {b.notes && <p style={{ fontSize: "0.8rem", color: "#6B5B4E", marginTop: "0.375rem" }}>{b.notes}</p>}
+                    </div>
+                    {b.status === "accepted" && (
+                      <button className="btn-boafo btn-primary" style={{ padding: "0.45rem 1rem", fontSize: "0.8rem" }}
+                        onClick={() => completeBookingMutation.mutate(b.id)}>
+                        Mark Complete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
