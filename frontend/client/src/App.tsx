@@ -16,6 +16,7 @@ import CustomerDashboard from "./pages/CustomerDashboard";
 import ProviderDashboard from "./pages/ProviderDashboard";
 import NotFound from "./pages/NotFound";
 import ProfilePage from "./pages/ProfilePage";
+import Feed from "./pages/Feed";
 
 function Router() {
   return (
@@ -30,6 +31,7 @@ function Router() {
       <Route path="/dashboard/admin" component={AdminDashboard} />
       <Route path="/chat/:id" component={ChatPage} />
       <Route path="/profile" component={ProfilePage} />
+      <Route path="/feed" component={Feed} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

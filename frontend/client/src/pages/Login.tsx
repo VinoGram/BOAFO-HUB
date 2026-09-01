@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "wouter";
-import { authApi } from "@/lib/api";
+import { Link, useLocation } from "wouter";
+import { authApi, setToken } from "@/lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNotification } from "@/contexts/NotificationContext";
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
-import { useNavigation } from "@/hooks/useNavigation";
 import { usePaystackPayment } from "react-paystack";
 import { useLoading } from "@/contexts/LoadingContext";
-import Papa from "papaparse";
+
 
 /* ── tiny helpers ── */
 type Step =
@@ -65,7 +64,7 @@ function Stars({ n }: { n: number }) {
 }
 
 export default function Login() {
-  const navigate = useNavigation();
+  const [, navigate] = useLocation();
   const qc = useQueryClient();
   const { addNotification } = useNotification();
   const { hideLoader } = useLoading();
@@ -96,7 +95,12 @@ export default function Login() {
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  const [districts, setDistricts] = useState<string[]>([]);
+  const GHANA_REGIONS = [
+    "Ashanti", "Greater Accra", "Eastern", "Central",
+    "Western", "Western North", "Volta", "Oti",
+    "Northern", "North East", "Savannah", "Bono",
+    "Bono East", "Ahafo", "Upper East", "Upper West",
+  ];
   const [selectedDistricts, setSelectedDistricts] = useState<string[]>([]);
   
   const paystackConfig = {
@@ -119,35 +123,18 @@ export default function Login() {
   const initializePayment = usePaystackPayment(paystackConfig);
 
 
-  const { data: me } = useQuery({
+  const { data: me, isLoading: meLoading } = useQuery({
     queryKey: ["auth", "me"],
     queryFn: () => authApi.me().catch(() => null),
     retry: false,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   useEffect(() => {
-    async function fetchDistricts() {
-      try {
-        const response = await fetch('/districts.csv');
-        const reader = response.body?.getReader();
-        const result = await reader?.read();
-        const decoder = new TextDecoder('utf-8');
-        const csv = decoder.decode(result?.value);
-        Papa.parse<{ District: string }>(csv, {
-          header: true,
-          complete: (results) => {
-            const districtNames = results.data.map(row => row.District).filter(Boolean) as string[];
-            setDistricts(districtNames);
-          }
-        });
-      } catch (err) { console.error("Failed to fetch or parse districts CSV:", err); }
-    }
-    fetchDistricts();
-  }, []);
-
-  useEffect(() => {
-    if (me) navigate("/");
-  }, [me]);
+    if (meLoading) return;
+    if (me?.id) navigate(me.role === "provider" ? "/dashboard/provider" : "/dashboard/customer");
+  }, [me, meLoading]);
 
   useEffect(() => {
     hideLoader();
@@ -249,6 +236,7 @@ export default function Login() {
         setStep("phone-name");
         return;
       }
+      if (res.token) setToken(res.token);
       qc.setQueryData(["auth", "me"], res.user);
       navigate(
         res.user.role === "provider" ? "/dashboard/provider" : "/dashboard/customer"
@@ -280,6 +268,7 @@ export default function Login() {
           role,
           ...(role === "provider" && { plan, districts: selectedDistricts }),
         });
+      if (res.token) setToken(res.token);
       qc.setQueryData(["auth", "me"], res.user);
       navigate(
         res.user.role === "provider" ? "/dashboard/provider" : "/dashboard/customer"
@@ -329,6 +318,7 @@ export default function Login() {
             return authApi.register(formData);
           })();
 
+      if (res.token) setToken(res.token);
       qc.setQueryData(["auth", "me"], res.user);
       navigate(
         res.user.role === "provider" ? "/dashboard/provider" : "/dashboard/customer"
@@ -409,17 +399,13 @@ export default function Login() {
 
   const handleDistrictChange = (district: string) => {
     setSelectedDistricts(prev => {
-      const isSelected = prev.includes(district);
-      if (isSelected) {
-        return prev.filter(d => d !== district);
-      } else {
-        if (plan === 'Premium' && prev.length >= 2) {
-          setError("Premium plan allows a maximum of 2 districts.");
-          return prev;
-        }
-        setError("");
-        return [...prev, district];
+      if (prev.includes(district)) return prev.filter(d => d !== district);
+      if (plan === 'Premium' && prev.length >= 2) {
+        setError("Premium plan allows a maximum of 2 regions.");
+        return prev;
       }
+      setError("");
+      return [...prev, district];
     });
   };
 
@@ -480,7 +466,7 @@ export default function Login() {
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#FFF8EE", padding: "1rem" }}>
         <div style={{ width: "100%", maxWidth: 440, padding: "2.5rem 2rem", ...P }}>
           {/* Logo */}
-          <Link href="/" onClick={() => navigate('/')} style={{ display: "flex", alignItems: "center", gap: "0.5rem", textDecoration: "none", marginBottom: "1.5rem" }}>
+          <Link href="/" style={{ display: "flex", alignItems: "center", gap: "0.5rem", textDecoration: "none", marginBottom: "1.5rem" }}>
             <span
               style={{ width: 34, height: 34, borderRadius: "50%", background: "linear-gradient(135deg,#ABC270,#8FA853)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: "0.95rem" }}
             >
@@ -616,45 +602,25 @@ export default function Login() {
 
               {role === "provider" && (
                 <div style={{ marginBottom: "1.5rem" }}>
-                  <label className="boafo-label">Select your operational districts</label>
+                  <label className="boafo-label">Select your operational regions</label>
                   {plan !== 'Premium' && (
                     <div style={{ marginBottom: '0.5rem' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                         <input
                           type="checkbox"
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedDistricts(districts);
-                            } else {
-                              setSelectedDistricts([]);
-                            }
-                          }}
-                          checked={selectedDistricts.length === districts.length && districts.length > 0}
+                          onChange={(e) => setSelectedDistricts(e.target.checked ? GHANA_REGIONS : [])}
+                          checked={selectedDistricts.length === GHANA_REGIONS.length}
                         />
-                        Select All Districts
+                        Select All Regions
                       </label>
                     </div>
                   )}
-                  <div style={{
-                    maxHeight: '200px',
-                    overflowY: 'auto',
-                    border: '1px solid #E8D9BF',
-                    borderRadius: '12px',
-                    padding: '1rem',
-                    background: '#fff'
-                  }}>
-                    {districts.map(d => (
-                      <div key={d}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                          <input
-                            type="checkbox"
-                            value={d}
-                            checked={selectedDistricts.includes(d)}
-                            onChange={() => handleDistrictChange(d)}
-                          />
-                          {d}
-                        </label>
-                      </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', border: '1px solid #E8D9BF', borderRadius: '12px', padding: '1rem', background: '#fff' }}>
+                    {GHANA_REGIONS.map(r => (
+                      <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem' }}>
+                        <input type="checkbox" value={r} checked={selectedDistricts.includes(r)} onChange={() => handleDistrictChange(r)} />
+                        {r}
+                      </label>
                     ))}
                   </div>
                 </div>
@@ -943,45 +909,25 @@ export default function Login() {
                     )}
                     {role === "provider" && (
                       <div>
-                        <label className="boafo-label">Select your operational districts</label>
+                        <label className="boafo-label">Select your operational regions</label>
                         {plan !== 'Premium' && (
                           <div style={{ marginBottom: '0.5rem' }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                               <input
                                 type="checkbox"
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedDistricts(districts);
-                                  } else {
-                                    setSelectedDistricts([]);
-                                  }
-                                }}
-                                checked={selectedDistricts.length === districts.length && districts.length > 0}
+                                onChange={(e) => setSelectedDistricts(e.target.checked ? GHANA_REGIONS : [])}
+                                checked={selectedDistricts.length === GHANA_REGIONS.length}
                               />
-                              Select All Districts
+                              Select All Regions
                             </label>
                           </div>
                         )}
-                        <div style={{
-                          maxHeight: '200px',
-                          overflowY: 'auto',
-                          border: '1px solid #E8D9BF',
-                          borderRadius: '12px',
-                          padding: '1rem',
-                          background: '#fff'
-                        }}>
-                          {districts.map(d => (
-                            <div key={d}>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                                <input
-                                  type="checkbox"
-                                  value={d}
-                                  checked={selectedDistricts.includes(d)}
-                                  onChange={() => handleDistrictChange(d)}
-                                />
-                                {d}
-                              </label>
-                            </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', border: '1px solid #E8D9BF', borderRadius: '12px', padding: '1rem', background: '#fff' }}>
+                          {GHANA_REGIONS.map(r => (
+                            <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem' }}>
+                              <input type="checkbox" value={r} checked={selectedDistricts.includes(r)} onChange={() => handleDistrictChange(r)} />
+                              {r}
+                            </label>
                           ))}
                         </div>
                       </div>

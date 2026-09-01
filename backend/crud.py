@@ -158,6 +158,18 @@ def get_open_jobs(db: Session, limit: int = 20, offset: int = 0):
     return [dict(r) for r in rows]
 
 
+def get_open_jobs_by_regions(db: Session, regions: list, limit: int = 20, offset: int = 0):
+    # Match jobs whose location contains any of the provider's regions (case-insensitive)
+    conditions = " OR ".join(f"location ILIKE :r{i}" for i in range(len(regions)))
+    params: dict = {"lim": limit, "off": offset}
+    for i, r in enumerate(regions):
+        params[f"r{i}"] = f"%{r}%"
+    rows = db.execute(text(
+        f'SELECT * FROM jobs WHERE status=\'open\' AND ({conditions}) ORDER BY "createdAt" DESC LIMIT :lim OFFSET :off'
+    ), params).mappings().all()
+    return [dict(r) for r in rows]
+
+
 def get_jobs_by_customer(db: Session, customer_id: int):
     rows = db.execute(text(
         'SELECT * FROM jobs WHERE "customerId"=:cid ORDER BY "createdAt" DESC'
@@ -175,10 +187,10 @@ def get_jobs_by_category(db: Session, trade_category_id: int, limit: int = 20, o
 def create_job(db: Session, data: dict):
     row = db.execute(text(
         'INSERT INTO jobs ("customerId", "tradeCategoryId", title, description, budget, location, '
-        'latitude, longitude, status, "preferredStartDate") '
+        'latitude, longitude, status, "preferredStartDate", "imageUrls") '
         'VALUES (:customerId, :tradeCategoryId, :title, :description, :budget, :location, '
-        ':latitude, :longitude, :status, :preferredStartDate) RETURNING id'
-    ), data).mappings().first()
+        ':latitude, :longitude, :status, :preferredStartDate, :imageUrls) RETURNING id'
+    ), {**data, "imageUrls": data.get("imageUrls", [])}).mappings().first()
     db.commit()
     return row["id"] if row else 0
 

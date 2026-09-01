@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from backend.database import get_db
 from backend.auth import require_user
 import backend.crud as crud
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+import uuid
+from backend.cloudinary import upload_image
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -30,9 +32,17 @@ class PlaceBid(BaseModel):
 
 
 @router.get("")
-def list_jobs(limit: int = Query(20), offset: int = Query(0), db: Session = Depends(get_db)):
+def list_jobs(request: Request, limit: int = Query(20), offset: int = Query(0), db: Session = Depends(get_db)):
     if not db:
         return []
+    from backend.auth import get_current_user
+    user = get_current_user(request)
+    if user and user.get("role") == "provider":
+        profile = crud.get_provider_profile(db, user["sub"])
+        if profile and profile.get("plan") != "Diamond":
+            regions = profile.get("serviceRegions") or []
+            if regions:
+                return crud.get_open_jobs_by_regions(db, regions, limit, offset)
     return crud.get_open_jobs(db, limit, offset)
 
 
@@ -105,25 +115,92 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     return job
 
 
-@router.post("")
-def create_job(body: CreateJob, request: Request, db: Session = Depends(get_db)):
+@router.post("/{job_id}/interest")
+def toggle_interest(job_id: int, request: Request, db: Session = Depends(get_db)):
+    """Provider marks/unmarks interest in a job."""
+    user = require_user(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    if user.get("role") != "provider":
+        raise HTTPException(403, "Only providers can express interest")
+    profile = crud.get_provider_profile(db, user["sub"])
+    if not profile:
+        raise HTTPException(404, "Provider profile not found")
+    existing = db.execute(text(
+        'SELECT id FROM job_interests WHERE "jobId"=:j AND "providerId"=:p LIMIT 1'
+    ), {"j": job_id, "p": profile["id"]}).mappings().first()
+    if existing:
+        db.execute(text('DELETE FROM job_interests WHERE id=:id'), {"id": existing["id"]})
+        db.commit()
+        return {"interested": False}
+    db.execute(text('INSERT INTO job_interests ("jobId","providerId") VALUES (:j,:p)'), {"j": job_id, "p": profile["id"]})
+    db.commit()
+    return {"interested": True}
+
+
+@router.get("/{job_id}/interests")
+def get_interests(job_id: int, request: Request, db: Session = Depends(get_db)):
+    """Customer sees which providers are interested in their job."""
+    require_user(request)
+    if not db:
+        return []
+    rows = db.execute(text(
+        'SELECT pp.id as "providerId", u.name, u."profilePictureUrl", '
+        'pp."averageRating", pp."yearsOfExperience", pp."verificationStatus" '
+        'FROM job_interests ji '
+        'JOIN provider_profiles pp ON ji."providerId"=pp.id '
+        'JOIN users u ON pp."userId"=u.id '
+        'WHERE ji."jobId"=:j ORDER BY ji."createdAt" ASC'
+    ), {"j": job_id}).mappings().all()
+    return [dict(r) for r in rows]
+
+
+
+    request: Request,
+    db: Session = Depends(get_db),
+    tradeCategoryId: int = Form(...),
+    title: str = Form(...),
+    description: str = Form(...),
+    budget: Optional[str] = Form(None),
+    location: Optional[str] = Form(None),
+    latitude: Optional[str] = Form(None),
+    longitude: Optional[str] = Form(None),
+    preferredStartDate: Optional[str] = Form(None),
+    images: List[UploadFile] = File(default=[]),
+):
     user = require_user(request)
     if not db:
         raise HTTPException(503, "Database unavailable")
     profile = crud.get_customer_profile(db, user["sub"])
     if not profile:
         raise HTTPException(404, "Customer profile not found. Please complete your profile first.")
+
+    image_urls: list[str] = []
+    for img in images:
+        if img and img.filename:
+            url = await upload_image(img, "jobs", f"job_{profile['id']}_{uuid.uuid4().hex[:8]}")
+            image_urls.append(url)
+
+    from datetime import datetime as dt
+    parsed_date = None
+    if preferredStartDate:
+        try:
+            parsed_date = dt.fromisoformat(preferredStartDate)
+        except ValueError:
+            pass
+
     job_id = crud.create_job(db, {
         "customerId": profile["id"],
-        "tradeCategoryId": body.tradeCategoryId,
-        "title": body.title,
-        "description": body.description,
-        "budget": float(body.budget) if body.budget else None,
-        "location": body.location,
-        "latitude": float(body.latitude) if body.latitude else None,
-        "longitude": float(body.longitude) if body.longitude else None,
+        "tradeCategoryId": tradeCategoryId,
+        "title": title,
+        "description": description,
+        "budget": float(budget) if budget else None,
+        "location": location,
+        "latitude": float(latitude) if latitude else None,
+        "longitude": float(longitude) if longitude else None,
         "status": "open",
-        "preferredStartDate": body.preferredStartDate,
+        "preferredStartDate": parsed_date,
+        "imageUrls": image_urls,
     })
     return {"success": True, "jobId": job_id}
 

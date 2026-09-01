@@ -1,4 +1,5 @@
 import { authApi } from "@/lib/api";
+import { clearToken } from "@/lib/api";
 import { getLoginUrl } from "@/const";
 import { useCallback, useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,6 +23,7 @@ export function useAuth(options?: UseAuthOptions) {
   const logoutMutation = useMutation({
     mutationFn: () => authApi.logout(),
     onSuccess: () => {
+      clearToken();
       queryClient.setQueryData(["auth", "me"], null);
     },
   });
@@ -30,8 +32,8 @@ export function useAuth(options?: UseAuthOptions) {
     try {
       await logoutMutation.mutateAsync();
     } finally {
-      queryClient.setQueryData(["auth", "me"], null);
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      clearToken();
+      queryClient.clear();
     }
   }, [logoutMutation, queryClient]);
 
@@ -46,12 +48,12 @@ export function useAuth(options?: UseAuthOptions) {
 
   useEffect(() => {
     if (!redirectOnUnauthenticated) return;
-    if (meQuery.isLoading || logoutMutation.isPending) return;
+    if (meQuery.isLoading || meQuery.isFetching || logoutMutation.isPending) return;
     if (state.user) return;
     if (typeof window === "undefined") return;
     if (window.location.pathname === redirectPath) return;
     window.location.href = redirectPath;
-  }, [redirectOnUnauthenticated, redirectPath, logoutMutation.isPending, meQuery.isLoading, state.user]);
+  }, [redirectOnUnauthenticated, redirectPath, logoutMutation.isPending, meQuery.isLoading, meQuery.isFetching, state.user]);
 
   return {
     ...state,

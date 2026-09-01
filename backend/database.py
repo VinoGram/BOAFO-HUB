@@ -9,20 +9,21 @@ SessionLocal = None
 
 if DATABASE_URL:
     try:
-        # Neon gives postgresql:// — SQLAlchemy needs postgresql+psycopg2://
         url = DATABASE_URL
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+psycopg2://", 1)
         elif url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        elif not url.startswith("postgresql+"):
+            raise ValueError(f"Unsupported DATABASE_URL scheme. Expected postgresql://, got: {url.split('://')[0]}://")
 
         engine = create_engine(
             url,
             pool_pre_ping=True,
-            connect_args={"sslmode": "require"},  # Neon requires SSL
+            connect_args={"sslmode": "require"},
         )
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        print("[Database] Connected to Neon PostgreSQL")
+        print("[Database] Connected to PostgreSQL")
     except Exception as e:
         print(f"[Database] Failed to connect: {e}")
 

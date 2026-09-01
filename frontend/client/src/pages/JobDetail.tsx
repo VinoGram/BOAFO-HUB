@@ -3,6 +3,7 @@ import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { jobsApi, reviewsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { MapPin } from "lucide-react";
 
 function Stars({ n }: { n: number }) {
   return <span style={{ color: "#FEC868" }}>{"★".repeat(Math.round(n))}{"☆".repeat(5 - Math.round(n))}</span>;
@@ -81,9 +82,20 @@ export default function JobDetail() {
 
               <p style={{ color: "#6B5B4E", lineHeight: 1.75, marginBottom: "1.5rem" }}>{job.description}</p>
 
+              {/* Job images */}
+              {job.imageUrls?.length > 0 && (
+                <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
+                  {job.imageUrls.map((url: string, i: number) => (
+                    <a key={i} href={url} target="_blank" rel="noreferrer">
+                      <img src={url} alt={`Job photo ${i + 1}`} style={{ width: 120, height: 90, objectFit: "cover", borderRadius: "0.75rem", border: "1.5px solid #E8D9BF", cursor: "zoom-in" }} />
+                    </a>
+                  ))}
+                </div>
+              )}
+
               <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", paddingTop: "1.25rem", borderTop: "1px solid #E8D9BF" }}>
                 {job.budget && <div><p style={{ fontSize: "0.72rem", color: "#6B5B4E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.25rem" }}>Budget</p><p style={{ fontWeight: 800, color: "#473C33", fontSize: "1.1rem" }}>GH₵ {job.budget}</p></div>}
-                {job.location && <div><p style={{ fontSize: "0.72rem", color: "#6B5B4E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.25rem" }}>Location</p><p style={{ fontWeight: 600, color: "#473C33" }}>📍 {job.location}</p></div>}
+                {job.location && <div><p style={{ fontSize: "0.72rem", color: "#6B5B4E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.25rem" }}>Location</p><p style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontWeight: 600, color: "#473C33" }}><MapPin size={13} />{job.location}</p></div>}
                 <div><p style={{ fontSize: "0.72rem", color: "#6B5B4E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.25rem" }}>Posted</p><p style={{ fontWeight: 600, color: "#473C33" }}>{daysAgo === 0 ? "Today" : `${daysAgo} days ago`}</p></div>
                 <div><p style={{ fontSize: "0.72rem", color: "#6B5B4E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.25rem" }}>Bids</p><p style={{ fontWeight: 800, color: "#FDA769", fontSize: "1.1rem" }}>{(bids as any[]).length}</p></div>
               </div>

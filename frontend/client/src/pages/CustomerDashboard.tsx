@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { jobsApi, bookingsApi, categoriesApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation } from "wouter";
+import { MapPin, Camera, X, Navigation, Pencil } from "lucide-react";
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
@@ -34,7 +35,12 @@ export default function CustomerDashboard() {
   const { user, logout } = useAuth({ redirectOnUnauthenticated: true });
   const [tab, setTab] = useState("jobs");
   const [showPostJob, setShowPostJob] = useState(false);
-  const [jobForm, setJobForm] = useState({ title: "", description: "", tradeCategoryId: "", budget: "", location: "" });
+  const [jobForm, setJobForm] = useState({ title: "", description: "", tradeCategoryId: "", budget: "", location: "", latitude: "", longitude: "" });
+  const [jobImages, setJobImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [locMode, setLocMode] = useState<"manual" | "gps">("manual");
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [err, setErr] = useState("");
   const qc = useQueryClient();
 
@@ -43,8 +49,14 @@ export default function CustomerDashboard() {
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
 
   const postJobMutation = useMutation({
-    mutationFn: (data: any) => jobsApi.create(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["my-jobs"] }); setShowPostJob(false); setJobForm({ title: "", description: "", tradeCategoryId: "", budget: "", location: "" }); },
+    mutationFn: (data: FormData) => jobsApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-jobs"] });
+      setShowPostJob(false);
+      setJobForm({ title: "", description: "", tradeCategoryId: "", budget: "", location: "", latitude: "", longitude: "" });
+      setJobImages([]);
+      setImagePreviews([]);
+    },
     onError: (e: any) => setErr(e.message),
   });
 
@@ -86,9 +98,22 @@ export default function CustomerDashboard() {
         {/* Post Job Modal */}
         {showPostJob && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(71,60,51,0.5)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-            <div style={{ background: "#fff", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ background: "#fff", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }}>
               <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#473C33", marginBottom: "1.5rem" }}>Post a New Job</h2>
-              <form onSubmit={(e) => { e.preventDefault(); setErr(""); postJobMutation.mutate({ ...jobForm, tradeCategoryId: Number(jobForm.tradeCategoryId), budget: jobForm.budget }); }} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <form onSubmit={(e) => {
+                e.preventDefault(); setErr("");
+                const fd = new FormData();
+                fd.append("title", jobForm.title);
+                fd.append("description", jobForm.description);
+                fd.append("tradeCategoryId", jobForm.tradeCategoryId);
+                if (jobForm.budget) fd.append("budget", jobForm.budget);
+                if (jobForm.location) fd.append("location", jobForm.location);
+                if (jobForm.latitude) fd.append("latitude", jobForm.latitude);
+                if (jobForm.longitude) fd.append("longitude", jobForm.longitude);
+                jobImages.forEach(img => fd.append("images", img));
+                postJobMutation.mutate(fd);
+              }} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+
                 <div><label className="boafo-label">Job Title</label><input className="boafo-input" placeholder="e.g. Fix leaking kitchen pipe" value={jobForm.title} onChange={e => setJobForm(f => ({ ...f, title: e.target.value }))} required /></div>
                 <div><label className="boafo-label">Description</label><textarea className="boafo-input" rows={3} placeholder="Describe the problem in detail…" value={jobForm.description} onChange={e => setJobForm(f => ({ ...f, description: e.target.value }))} required style={{ resize: "none" }} /></div>
                 <div><label className="boafo-label">Trade Category</label>
@@ -97,14 +122,82 @@ export default function CustomerDashboard() {
                     {(categories as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
-                <div style={{ display: "flex", gap: "0.75rem" }}>
-                  <div style={{ flex: 1 }}><label className="boafo-label">Budget (GH₵)</label><input className="boafo-input" type="number" placeholder="Optional" value={jobForm.budget} onChange={e => setJobForm(f => ({ ...f, budget: e.target.value }))} /></div>
-                  <div style={{ flex: 1 }}><label className="boafo-label">Location</label><input className="boafo-input" placeholder="City / area" value={jobForm.location} onChange={e => setJobForm(f => ({ ...f, location: e.target.value }))} /></div>
+
+                {/* Location — dual mode */}
+                <div>
+                  <label className="boafo-label">Location</label>
+                  <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                    {(["manual", "gps"] as const).map(m => (
+                      <button key={m} type="button"
+                        onClick={() => {
+                          setLocMode(m);
+                          if (m === "gps") {
+                            setGpsLoading(true);
+                            navigator.geolocation.getCurrentPosition(
+                              async (pos) => {
+                                const { latitude, longitude } = pos.coords;
+                                setJobForm(f => ({ ...f, latitude: String(latitude), longitude: String(longitude) }));
+                                try {
+                                  const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+                                  const d = await r.json();
+                                  setJobForm(f => ({ ...f, location: d.display_name?.split(",").slice(0, 3).join(",") || "" }));
+                                } catch {}
+                                setGpsLoading(false);
+                              },
+                              () => { setGpsLoading(false); setErr("Location access denied"); }
+                            );
+                          }
+                        }}
+                        style={{ padding: "0.3rem 0.9rem", borderRadius: 9999, border: "1.5px solid", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600,
+                          borderColor: locMode === m ? "#ABC270" : "#E8D9BF",
+                          background: locMode === m ? "rgba(171,194,112,0.12)" : "transparent",
+                          color: locMode === m ? "#8FA853" : "#6B5B4E" }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>{m === "manual" ? <><Pencil size={12} /> Type</> : <><Navigation size={12} /> Use GPS</>}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {gpsLoading && <p style={{ display: "flex", alignItems: "center", gap: "0.375rem", fontSize: "0.8rem", color: "#6B5B4E" }}><Navigation size={13} />Getting location…</p>}
+                  <input className="boafo-input" placeholder="City / area or GPS will fill this" value={jobForm.location}
+                    onChange={e => setJobForm(f => ({ ...f, location: e.target.value }))} readOnly={locMode === "gps" && !gpsLoading} />
+                  {jobForm.latitude && <p style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.75rem", color: "#8FA853", marginTop: "0.25rem" }}><MapPin size={12} />{parseFloat(jobForm.latitude).toFixed(5)}, {parseFloat(jobForm.longitude).toFixed(5)}</p>}
                 </div>
+
+                <div><label className="boafo-label">Budget (GH₵)</label><input className="boafo-input" type="number" placeholder="Optional" value={jobForm.budget} onChange={e => setJobForm(f => ({ ...f, budget: e.target.value }))} /></div>
+
+                {/* Image upload */}
+                <div>
+                  <label className="boafo-label">Photos of the Problem (optional)</label>
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{ border: "2px dashed #E8D9BF", borderRadius: "0.875rem", padding: "1.25rem", textAlign: "center", cursor: "pointer", background: "#FAFAF8" }}>
+                    <p style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.375rem", color: "#6B5B4E", fontSize: "0.85rem" }}><Camera size={15} /> Click to add photos</p>
+                    <p style={{ color: "#999", fontSize: "0.75rem" }}>Up to 5 images</p>
+                  </div>
+                  <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+                    onChange={e => {
+                      const files = Array.from(e.target.files || []).slice(0, 5);
+                      setJobImages(files);
+                      setImagePreviews(files.map(f => URL.createObjectURL(f)));
+                    }} />
+                  {imagePreviews.length > 0 && (
+                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+                      {imagePreviews.map((src, i) => (
+                        <div key={i} style={{ position: "relative" }}>
+                          <img src={src} alt="" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: "0.625rem", border: "1.5px solid #E8D9BF" }} />
+                          <button type="button" onClick={() => {
+                            setJobImages(imgs => imgs.filter((_, j) => j !== i));
+                            setImagePreviews(ps => ps.filter((_, j) => j !== i));
+                          }} style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "#E05A3A", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {err && <div style={{ color: "#C0392B", fontSize: "0.875rem", background: "rgba(224,90,58,0.08)", borderRadius: "0.625rem", padding: "0.625rem 0.875rem" }}>{err}</div>}
                 <div style={{ display: "flex", gap: "0.75rem" }}>
                   <button type="submit" className="btn-boafo btn-primary" style={{ flex: 1, justifyContent: "center" }} disabled={postJobMutation.isPending}>{postJobMutation.isPending ? "Posting…" : "Post Job"}</button>
-                  <button type="button" className="btn-boafo btn-outline" style={{ flex: 1, justifyContent: "center" }} onClick={() => setShowPostJob(false)}>Cancel</button>
+                  <button type="button" className="btn-boafo btn-outline" style={{ flex: 1, justifyContent: "center" }} onClick={() => { setShowPostJob(false); setJobImages([]); setImagePreviews([]); }}>Cancel</button>
                 </div>
               </form>
             </div>
@@ -143,7 +236,7 @@ export default function CustomerDashboard() {
                       <p style={{ fontSize: "0.8rem", color: "#6B5B4E", marginBottom: "0.5rem" }}>{j.description?.slice(0, 100)}…</p>
                       <div style={{ display: "flex", gap: "1rem", fontSize: "0.8rem", color: "#6B5B4E" }}>
                         {j.budget && <span>GH₵ {j.budget}</span>}
-                        {j.location && <span>📍 {j.location}</span>}
+                        {j.location && <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><MapPin size={12} />{j.location}</span>}
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>

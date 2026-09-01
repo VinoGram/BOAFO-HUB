@@ -3,7 +3,14 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,
+      retry: false,
+    },
+  },
+});
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>

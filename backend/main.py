@@ -9,7 +9,7 @@ load_dotenv()
 from backend.routers import (
     auth, oauth, categories, providers, customers,
     jobs, bookings, reviews, chat, notifications, payments, matching,
-    documents, availability, reports, profile,
+    documents, availability, reports, profile, feed, direct_chat,
 )
 
 app = FastAPI(title="BOAFO Marketplace API")
@@ -25,7 +25,7 @@ app.add_middleware(
 for module in [
     auth, oauth, categories, providers, customers,
     jobs, bookings, reviews, chat, notifications, payments, matching,
-    documents, availability, reports, profile,
+    documents, availability, reports, profile, feed, direct_chat,
 ]:
     app.include_router(module.router)
 

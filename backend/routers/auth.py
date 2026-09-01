@@ -52,7 +52,7 @@ def _verify_password(pw: str, pw_hash: str) -> bool:
 def _make_token(user_id: int, open_id: str, name: str, role: str = "customer") -> str:
     exp = datetime.now(timezone.utc) + timedelta(seconds=ONE_YEAR_SECONDS)
     return jwt.encode(
-        {"sub": user_id, "openId": open_id, "name": name, "role": role, "exp": exp},
+        {"sub": str(user_id), "openId": open_id, "name": name, "role": role, "exp": exp},
         JWT_SECRET, algorithm="HS256"
     )
 
@@ -77,6 +77,9 @@ def _get_email_credentials() -> tuple[str, int, str, str, str]:
     return (SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM)
 
 
+COMPANY_NAME = os.getenv("COMPANY_NAME", "BOAFO")
+
+
 def _send_email(to_email: str, subject: str, body: str) -> bool:
     host, port, username, password, from_address = _get_email_credentials()
     if not host or not username or not password or not from_address:
@@ -85,7 +88,7 @@ def _send_email(to_email: str, subject: str, body: str) -> bool:
     try:
         msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = from_address
+        msg["From"] = f"{COMPANY_NAME} <{from_address}>"
         msg["To"] = to_email
         msg.set_content(body)
         with smtplib.SMTP(host, port) as smtp:
@@ -243,8 +246,8 @@ async def verify_otp(
             })
 
     token = _make_token(user["id"], user["openId"], user.get("name") or "", user.get("role") or "customer")
-    response.set_cookie(COOKIE_NAME, token, max_age=ONE_YEAR_SECONDS, httponly=True, samesite="lax")
-    return {"success": True, "user": {"id": user["id"], "name": user.get("name"), "phone": user.get("phone"), "role": user.get("role"), "profilePictureUrl": user.get("profilePictureUrl"), "email": user.get("email")}}
+    response.set_cookie(COOKIE_NAME, token, max_age=ONE_YEAR_SECONDS, httponly=True, samesite="lax", path="/")
+    return {"success": True, "token": token, "user": {"id": user["id"], "name": user.get("name"), "phone": user.get("phone"), "role": user.get("role"), "profilePictureUrl": user.get("profilePictureUrl"), "email": user.get("email")}}
 
 
 @router.post("/login")
@@ -252,8 +255,8 @@ def login(body: LoginBody, response: Response, db: Session = Depends(get_db)):
     if not db:
         raise HTTPException(503, "Database unavailable")
     row = db.execute(
-        text('SELECT * FROM users WHERE email=:email LIMIT 1'),
-        {"email": body.email}
+        text('SELECT * FROM users WHERE LOWER(email)=LOWER(:email) LIMIT 1'),
+        {"email": body.email.strip()}
     ).mappings().first()
     if not row:
         raise HTTPException(401, "Invalid email or password")
@@ -263,13 +266,8 @@ def login(body: LoginBody, response: Response, db: Session = Depends(get_db)):
     user = row
 
     token = _make_token(user["id"], user["openId"], user.get("name") or "", user.get("role") or "customer")
-    response.set_cookie(COOKIE_NAME, token, max_age=ONE_YEAR_SECONDS, httponly=True, samesite="lax")
-    _send_email(
-        user.get("email") or "",
-        "Welcome to BOAFO",
-        f"Hi {user.get('name') or 'there'},\n\nYour BOAFO account has been created successfully."
-    )
-    return {"success": True, "user": {"id": user["id"], "name": user.get("name"), "email": user.get("email"), "role": user.get("role"), "profilePictureUrl": user.get("profilePictureUrl"), "phone": user.get("phone")}}
+    response.set_cookie(COOKIE_NAME, token, max_age=ONE_YEAR_SECONDS, httponly=True, samesite="lax", path="/")
+    return {"success": True, "token": token, "user": {"id": user["id"], "name": user.get("name"), "email": user.get("email"), "role": user.get("role"), "profilePictureUrl": user.get("profilePictureUrl"), "phone": user.get("phone")}}
 
 
 @router.post("/register")
@@ -286,7 +284,8 @@ async def register(
 ):
     if not db:
         raise HTTPException(503, "Database unavailable")
-    existing = db.execute(text("SELECT id FROM users WHERE email=:e LIMIT 1"), {"e": email}).mappings().first()
+    email = email.strip().lower()
+    existing = db.execute(text("SELECT id FROM users WHERE LOWER(email)=:e LIMIT 1"), {"e": email}).mappings().first()
     if existing:
         raise HTTPException(400, "Email already registered")
     open_id = f"local_{email}"
@@ -319,13 +318,8 @@ async def register(
             "serviceRegions": []
         })
     token = _make_token(user["id"], user["openId"], user.get("name") or "", user.get("role") or "customer")
-    response.set_cookie(COOKIE_NAME, token, max_age=ONE_YEAR_SECONDS, httponly=True, samesite="lax")
-    _send_email(
-        user.get("email") or "",
-        "Welcome to BOAFO",
-        f"Hi {user.get('name') or 'there'},\n\nYour BOAFO account has been created successfully."
-    )
-    return {"success": True, "user": {"id": user["id"], "name": user.get("name"), "email": user.get("email"), "role": user.get("role"), "profilePictureUrl": user.get("profilePictureUrl"), "phone": user.get("phone")}}
+    response.set_cookie(COOKIE_NAME, token, max_age=ONE_YEAR_SECONDS, httponly=True, samesite="lax", path="/")
+    return {"success": True, "token": token, "user": {"id": user["id"], "name": user.get("name"), "email": user.get("email"), "role": user.get("role"), "profilePictureUrl": user.get("profilePictureUrl"), "phone": user.get("phone")}}
 
 
 @router.post("/password/forgot")
@@ -436,5 +430,5 @@ def password_reset(body: ResetPasswordBody, response: Response, db: Session = De
 
 @router.post("/logout")
 def logout(response: Response):
-    response.delete_cookie(COOKIE_NAME)
+    response.delete_cookie(COOKIE_NAME, path="/")
     return {"success": True}

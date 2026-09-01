@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   email           VARCHAR(320),
   phone           VARCHAR(20),
   "loginMethod"   VARCHAR(64),
-  "passwordHash"  VARCHAR(64),
+  "passwordHash"  VARCHAR(255),
   role            VARCHAR(20) NOT NULL DEFAULT 'customer' CHECK (role IN ('customer','provider','admin')),
   "profilePictureUrl" TEXT,
   "createdAt"     TIMESTAMPTZ NOT NULL DEFAULT NOW(),

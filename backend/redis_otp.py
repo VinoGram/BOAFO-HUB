@@ -1,45 +1,46 @@
 import os
 import json
+import httpx
 from datetime import datetime, timezone
+from fastapi import HTTPException
 
-import redis
+UPSTASH_URL   = os.getenv("UPSTASH_REDIS_REST_URL", "").rstrip("/")
+UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 
-
-REDIS_URL = os.getenv("REDIS_URL", "")
-OTP_TTL_SECONDS = int(os.getenv("OTP_TTL_SECONDS", "600"))  # default 10 minutes
+OTP_TTL_SECONDS = int(os.getenv("OTP_TTL_SECONDS", "600"))
 
 
 class RedisOTPStore:
     def __init__(self) -> None:
-        if not REDIS_URL:
-            # App can still run without OTP/forgot; endpoints will error clearly.
-            self._client = None
-            return
-        self._client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+        self._ready = bool(UPSTASH_URL and UPSTASH_TOKEN)
 
-    def _require(self):
-        if not self._client:
-            raise RuntimeError("REDIS_URL is not configured")
-        return self._client
+    def _headers(self) -> dict:
+        return {"Authorization": f"Bearer {UPSTASH_TOKEN}"}
 
-    def make_key(self, purpose: str, email: str | None, phone: str | None) -> str:
-        # Keep keys stable and namespaced
+    def _cmd(self, *args) -> dict:
+        """Execute a Redis command via Upstash REST API."""
+        url = f"{UPSTASH_URL}/{'/'.join(str(a) for a in args)}"
+        resp = httpx.post(url, headers=self._headers(), timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+
+    def make_key(self, purpose: str, email: str | None = None, phone: str | None = None) -> str:
         safe_email = (email or "").strip().lower()
         safe_phone = (phone or "").strip()
         return f"boafo:otp:{purpose}:email:{safe_email}:phone:{safe_phone}"
 
     def set_otp(self, key: str, otp: str, meta: dict | None = None) -> None:
-        c = self._require()
-        payload = {
+        payload = json.dumps({
             "otp": otp,
             "meta": meta or {},
             "setAt": datetime.now(timezone.utc).isoformat(),
-        }
-        c.setex(key, OTP_TTL_SECONDS, json.dumps(payload))
+        })
+        # SET key value EX ttl
+        self._cmd("SET", key, payload, "EX", OTP_TTL_SECONDS)
 
     def get_otp_payload(self, key: str) -> dict | None:
-        c = self._require()
-        raw = c.get(key)
+        result = self._cmd("GET", key)
+        raw = result.get("result")
         if not raw:
             return None
         try:
@@ -48,17 +49,13 @@ class RedisOTPStore:
             return None
 
     def delete_key(self, key: str) -> None:
-        c = self._require()
-        c.delete(key)
+        self._cmd("DEL", key)
 
 
 store = RedisOTPStore()
 
 
 def otp_store_required() -> RedisOTPStore:
-    # Helper for endpoints: fail with a clear message if Redis isn't configured.
-    if getattr(store, "_client", None) is None:
-        raise RuntimeError("Redis OTP store is not configured. Set REDIS_URL in backend env.")
+    if not store._ready:
+        raise HTTPException(503, "OTP service unavailable: UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN is not configured")
     return store
-
-
