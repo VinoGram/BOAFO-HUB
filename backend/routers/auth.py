@@ -121,6 +121,7 @@ class VerifyOTPBody(BaseModel):
     name: str = ""
     role: str = "customer"
     plan: Optional[str] = "Premium"
+    districts: Optional[list] = []
 
 class LoginBody(BaseModel):
     email: str
@@ -188,6 +189,7 @@ async def verify_otp(
     name: str = Form(""),
     role: str = Form("customer"),
     plan: Optional[str] = Form("Premium"),
+    districts: Optional[str] = Form(""),
     profile_picture: Optional[UploadFile] = File(None),
 ):
     phone = _normalize_phone(phone)
@@ -233,6 +235,8 @@ async def verify_otp(
         if role == "customer":
             crud.create_customer_profile(db, {"userId": user["id"], "address": None, "latitude": None, "longitude": None})
         elif role == "provider":
+            import json as _json
+            region_list = [r.strip() for r in (districts or "").split(",") if r.strip()] if districts else []
             crud.create_provider_profile(db, {
                 "userId": user["id"],
                 "bio": None,
@@ -241,8 +245,8 @@ async def verify_otp(
                 "serviceAreaRadius": None,
                 "serviceAreaLatitude": None,
                 "serviceAreaLongitude": None,
-                "plan": plan,
-                "serviceRegions": []
+                "plan": plan or "Premium",
+                "serviceRegions": region_list,
             })
 
     token = _make_token(user["id"], user["openId"], user.get("name") or "", user.get("role") or "customer")
@@ -280,6 +284,7 @@ async def register(
     role: str = Form("customer"),
     phone: str = Form(""),
     plan: Optional[str] = Form("Premium"),
+    districts: Optional[str] = Form(""),
     profile_picture: Optional[UploadFile] = File(None),
 ):
     if not db:
@@ -306,6 +311,7 @@ async def register(
     if role == "customer":
         crud.create_customer_profile(db, {"userId": user["id"], "address": None, "latitude": None, "longitude": None})
     elif role == "provider":
+        region_list = [r.strip() for r in (districts or "").split(",") if r.strip()]
         crud.create_provider_profile(db, {
             "userId": user["id"],
             "bio": None,
@@ -314,8 +320,8 @@ async def register(
             "serviceAreaRadius": None,
             "serviceAreaLatitude": None,
             "serviceAreaLongitude": None,
-            "plan": plan,
-            "serviceRegions": []
+            "plan": plan or "Premium",
+            "serviceRegions": region_list,
         })
     token = _make_token(user["id"], user["openId"], user.get("name") or "", user.get("role") or "customer")
     response.set_cookie(COOKIE_NAME, token, max_age=ONE_YEAR_SECONDS, httponly=True, samesite="lax", path="/")

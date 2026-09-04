@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { providersApi, bookingsApi, reviewsApi } from "@/lib/api";
+import { providersApi, bookingsApi, directChatApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { MessageCircle, Phone } from "lucide-react";
 
 function Stars({ n }: { n: number }) {
   const r = Math.round(n);
@@ -220,9 +221,20 @@ export default function ProviderProfile() {
                 <a href="/login" className="btn-boafo btn-primary" style={{ width: "100%", justifyContent: "center" }}>Sign In to Book</a>
               )}
 
+              {isAuthenticated && user?.role === "customer" && (
+                <button
+                  className="btn-boafo btn-secondary"
+                  style={{ width: "100%", justifyContent: "center", marginTop: "0.75rem", display: "flex", alignItems: "center", gap: 6 }}
+                  onClick={() => {
+                    directChatApi.startChat(id).then(res => navigate(`/chat/direct/${res.chatId}`));
+                  }}
+                >
+                  <MessageCircle size={15} /> Chat with Provider
+                </button>
+              )}
               {provider.userPhone && (
-                <a href={`tel:${provider.userPhone}`} className="btn-boafo btn-outline" style={{ width: "100%", justifyContent: "center", marginTop: "0.75rem" }}>
-                  📞 Call Directly
+                <a href={`tel:${provider.userPhone}`} className="btn-boafo btn-outline" style={{ width: "100%", justifyContent: "center", marginTop: "0.75rem", display: "flex", alignItems: "center", gap: 6 }}>
+                  <Phone size={15} /> Call Directly
                 </a>
               )}
             </div>

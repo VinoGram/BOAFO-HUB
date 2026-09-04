@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, useLocation } from "wouter";
+import { useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { directChatApi, getToken } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -9,7 +9,6 @@ interface Msg {
   id: number;
   senderId: number;
   senderName: string;
-  senderAvatar?: string;
   content: string;
   createdAt: string;
 }
@@ -18,7 +17,6 @@ export default function DirectChat() {
   const { chatId } = useParams<{ chatId: string }>();
   const id = parseInt(chatId);
   const { user } = useAuth({ redirectOnUnauthenticated: true });
-  const [, navigate] = useLocation();
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
@@ -39,8 +37,7 @@ export default function DirectChat() {
     const ws = new WebSocket(`${proto}//${location.host}/api/direct/ws/${id}?token=${token}`);
     wsRef.current = ws;
     ws.onmessage = (e) => {
-      const msg: Msg = JSON.parse(e.data);
-      setMsgs(prev => [...prev, msg]);
+      try { setMsgs(prev => [...prev, JSON.parse(e.data)]); } catch {}
     };
     return () => ws.close();
   }, [id]);
@@ -57,24 +54,23 @@ export default function DirectChat() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#FFF8EE", fontFamily: "'Inter',sans-serif" }}>
       <header style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.875rem 1rem", background: "rgba(255,248,238,0.97)", borderBottom: "1px solid #E8D9BF", position: "sticky", top: 0, zIndex: 10 }}>
-        <button onClick={() => navigate(-1 as any)} style={{ background: "none", border: "none", cursor: "pointer", color: "#473C33", display: "flex" }}>
+        <button onClick={() => history.length >= 0 && window.history.back()} style={{ background: "none", border: "none", cursor: "pointer", color: "#473C33", display: "flex" }}>
           <ArrowLeft size={20} />
         </button>
-        <span style={{ fontWeight: 700, color: "#473C33" }}>Chat</span>
+        <span style={{ fontWeight: 700, color: "#473C33", fontSize: "1rem" }}>Chat</span>
       </header>
 
       <main style={{ flex: 1, overflowY: "auto", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.625rem" }}>
-        {msgs.map(msg => {
+        {msgs.map((msg, i) => {
           const isMe = msg.senderId === user?.id;
           return (
-            <div key={msg.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start" }}>
+            <div key={msg.id ?? i} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start" }}>
               <div style={{
                 maxWidth: "72%", padding: "0.6rem 0.9rem", borderRadius: 14,
                 borderTopRightRadius: isMe ? 2 : 14, borderTopLeftRadius: isMe ? 14 : 2,
                 background: isMe ? "#ABC270" : "#fff",
                 color: isMe ? "#fff" : "#473C33",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.07)",
-                fontSize: "0.9rem", lineHeight: 1.5,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.07)", fontSize: "0.9rem", lineHeight: 1.5,
               }}>
                 {!isMe && <div style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: "0.2rem", opacity: 0.7 }}>{msg.senderName}</div>}
                 {msg.content}

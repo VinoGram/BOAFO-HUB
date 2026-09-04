@@ -3,7 +3,7 @@ import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { jobsApi, reviewsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
-import { MapPin } from "lucide-react";
+import { MapPin, Send, X } from "lucide-react";
 
 function Stars({ n }: { n: number }) {
   return <span style={{ color: "#FEC868" }}>{"★".repeat(Math.round(n))}{"☆".repeat(5 - Math.round(n))}</span>;
@@ -23,6 +23,8 @@ export default function JobDetail() {
 
   const [reviewForm, setReviewForm] = useState({ rating: 5, title: "", comment: "", bookingId: 0, providerId: 0 });
   const [showReview, setShowReview] = useState(false);
+  const [showBid, setShowBid] = useState(false);
+  const [bidForm, setBidForm] = useState({ amount: "", message: "", estimatedDays: "" });
 
   const { data: job, isLoading } = useQuery({ queryKey: ["job", id], queryFn: () => jobsApi.getById(id), enabled: !!id });
   const { data: bids = [] } = useQuery({ queryKey: ["job-bids", id], queryFn: () => jobsApi.getBids(id), enabled: !!id });
@@ -35,6 +37,11 @@ export default function JobDetail() {
   const reviewMutation = useMutation({
     mutationFn: (data: any) => reviewsApi.create(data),
     onSuccess: () => setShowReview(false),
+  });
+
+  const bidMutation = useMutation({
+    mutationFn: (data: any) => jobsApi.placeBid(id, data),
+    onSuccess: () => { setShowBid(false); setBidForm({ amount: "", message: "", estimatedDays: "" }); qc.invalidateQueries({ queryKey: ["job-bids", id] }); },
   });
 
   if (isLoading) return (
@@ -159,7 +166,7 @@ export default function JobDetail() {
               {!isAuthenticated ? (
                 <a href="/login" className="btn-boafo btn-primary" style={{ width: "100%", justifyContent: "center" }}>Sign In to Bid</a>
               ) : user?.role === "provider" && job.status === "open" ? (
-                <a href="/dashboard/provider" className="btn-boafo btn-primary" style={{ width: "100%", justifyContent: "center" }}>Place a Bid</a>
+                <button className="btn-boafo btn-primary" style={{ width: "100%", justifyContent: "center" }} onClick={() => setShowBid(true)}>Place a Bid</button>
               ) : user?.role === "customer" && job.status === "completed" ? (
                 <button className="btn-boafo btn-secondary" style={{ width: "100%", justifyContent: "center" }} onClick={() => setShowReview(true)}>
                   Leave a Review
@@ -181,6 +188,44 @@ export default function JobDetail() {
           </div>
         </div>
       </div>
+
+      {/* Bid Modal */}
+      {showBid && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(71,60,51,0.5)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+          <div style={{ background: "#fff", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: 440, fontFamily: "'Inter',sans-serif" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.25rem" }}>
+              <div>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#473C33", margin: "0 0 0.25rem" }}>Place a Bid</h2>
+                <p style={{ color: "#6B5B4E", fontSize: "0.85rem", margin: 0 }}>{job.title}</p>
+              </div>
+              <button onClick={() => setShowBid(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#8A7A6E", padding: 4 }}><X size={18} /></button>
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); bidMutation.mutate({ jobId: id, amount: bidForm.amount, message: bidForm.message, estimatedDays: bidForm.estimatedDays ? Number(bidForm.estimatedDays) : undefined }); }} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div style={{ display: "flex", gap: "0.75rem" }}>
+                <div style={{ flex: 1 }}>
+                  <label className="boafo-label">Price (GH₵)</label>
+                  <input className="boafo-input" type="number" required placeholder="e.g. 250" value={bidForm.amount} onChange={e => setBidForm(f => ({ ...f, amount: e.target.value }))} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label className="boafo-label">Est. Days</label>
+                  <input className="boafo-input" type="number" placeholder="e.g. 2" value={bidForm.estimatedDays} onChange={e => setBidForm(f => ({ ...f, estimatedDays: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="boafo-label">Message</label>
+                <textarea className="boafo-input" rows={3} placeholder="Why should they choose you?" value={bidForm.message} onChange={e => setBidForm(f => ({ ...f, message: e.target.value }))} style={{ resize: "none" }} />
+              </div>
+              {bidMutation.isError && <p style={{ color: "#E05A3A", fontSize: "0.8rem", margin: 0 }}>{(bidMutation.error as Error).message}</p>}
+              <div style={{ display: "flex", gap: "0.75rem" }}>
+                <button type="submit" className="btn-boafo btn-primary" style={{ flex: 1, justifyContent: "center", display: "flex", alignItems: "center", gap: 6 }} disabled={bidMutation.isPending}>
+                  <Send size={14} /> {bidMutation.isPending ? "Submitting…" : "Submit Bid"}
+                </button>
+                <button type="button" className="btn-boafo btn-outline" style={{ flex: 1, justifyContent: "center" }} onClick={() => setShowBid(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Review Modal */}
       {showReview && (

@@ -9,8 +9,8 @@ def get_user_by_open_id(db: Session, open_id: str):
     return dict(row) if row else None
 
 
-def get_user_by_id(db: Session, user_id: int):
-    row = db.execute(text("SELECT * FROM users WHERE id = :id LIMIT 1"), {"id": user_id}).mappings().first()
+def get_user_by_id(db: Session, user_id):
+    row = db.execute(text("SELECT * FROM users WHERE id = :id LIMIT 1"), {"id": int(user_id)}).mappings().first()
     return dict(row) if row else None
 
 
@@ -42,8 +42,8 @@ def get_trade_category_by_id(db: Session, category_id: int):
 
 # ── Provider Profiles ───────────────────────────────────────────────────────
 
-def get_provider_profile(db: Session, user_id: int):
-    row = db.execute(text('SELECT * FROM provider_profiles WHERE "userId" = :uid LIMIT 1'), {"uid": user_id}).mappings().first()
+def get_provider_profile(db: Session, user_id):
+    row = db.execute(text('SELECT * FROM provider_profiles WHERE "userId" = :uid LIMIT 1'), {"uid": int(user_id)}).mappings().first()
     return dict(row) if row else None
 
 
@@ -72,12 +72,14 @@ def search_providers_by_category(db: Session, trade_category_id: int, limit: int
 
 
 def create_provider_profile(db: Session, data: dict):
+    import json
+    regions = data.get("serviceRegions") or []
     row = db.execute(text(
         'INSERT INTO provider_profiles ("userId", bio, "yearsOfExperience", "hourlyRate", '
         '"serviceAreaRadius", "serviceAreaLatitude", "serviceAreaLongitude", plan, "serviceRegions") '
         'VALUES (:userId, :bio, :yearsOfExperience, :hourlyRate, :serviceAreaRadius, '
-        ':serviceAreaLatitude, :serviceAreaLongitude, :plan, :serviceRegions) RETURNING id'
-    ), data).mappings().first()
+        ':serviceAreaLatitude, :serviceAreaLongitude, :plan, :serviceRegions::jsonb) RETURNING id'
+    ), {**data, "plan": data.get("plan") or "Premium", "serviceRegions": json.dumps(regions)}).mappings().first()
     db.commit()
     return get_provider_profile(db, data["userId"])
 
@@ -130,8 +132,8 @@ def get_total_provider_earnings(db: Session, provider_id: int):
 
 # ── Customer Profiles ───────────────────────────────────────────────────────
 
-def get_customer_profile(db: Session, user_id: int):
-    row = db.execute(text('SELECT * FROM customer_profiles WHERE "userId"=:uid LIMIT 1'), {"uid": user_id}).mappings().first()
+def get_customer_profile(db: Session, user_id):
+    row = db.execute(text('SELECT * FROM customer_profiles WHERE "userId"=:uid LIMIT 1'), {"uid": int(user_id)}).mappings().first()
     return dict(row) if row else None
 
 
@@ -185,14 +187,20 @@ def get_jobs_by_category(db: Session, trade_category_id: int, limit: int = 20, o
 
 
 def create_job(db: Session, data: dict):
-    row = db.execute(text(
-        'INSERT INTO jobs ("customerId", "tradeCategoryId", title, description, budget, location, '
-        'latitude, longitude, status, "preferredStartDate", "imageUrls") '
-        'VALUES (:customerId, :tradeCategoryId, :title, :description, :budget, :location, '
-        ':latitude, :longitude, :status, :preferredStartDate, :imageUrls) RETURNING id'
-    ), {**data, "imageUrls": data.get("imageUrls", [])}).mappings().first()
+    if "imageUrls" not in data:
+        data["imageUrls"] = []
+    result = db.execute(
+        text(
+            'INSERT INTO jobs ("customerId", "tradeCategoryId", title, description, budget, '
+            'location, latitude, longitude, status, "preferredStartDate", "imageUrls") '
+            'VALUES (:customerId, :tradeCategoryId, :title, :description, :budget, '
+            ':location, :latitude, :longitude, :status, :preferredStartDate, :imageUrls) '
+            'RETURNING id'
+        ),
+        data,
+    )
     db.commit()
-    return row["id"] if row else 0
+    return result.scalar()
 
 
 # ── Bookings ────────────────────────────────────────────────────────────────

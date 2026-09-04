@@ -33,6 +33,56 @@ def build_profile_payload(row: dict) -> dict:
     }
 
 
+@router.get("/users")
+def list_users(db: Session = Depends(get_db)):
+    """Public list of all users with basic info."""
+    if not db:
+        return []
+    rows = db.execute(text(
+        'SELECT u.id, u.name, u.role, u."profilePictureUrl", u."createdAt", '
+        'pp.bio, pp."averageRating", pp."yearsOfExperience", pp."verificationStatus", pp."hourlyRate", pp.plan '
+        'FROM users u LEFT JOIN provider_profiles pp ON pp."userId"=u.id '
+        'ORDER BY u."createdAt" DESC'
+    )).mappings().all()
+    return [dict(r) for r in rows]
+
+
+@router.get("/user/{user_id}")
+def get_public_profile(user_id: int, db: Session = Depends(get_db)):
+    """Public profile for any user."""
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    row = db.execute(text(
+        'SELECT u.*, pp.bio, pp."averageRating", pp."yearsOfExperience", pp."verificationStatus", '
+        'pp."hourlyRate", pp.plan, pp."serviceRegions", pp."totalReviews" '
+        'FROM users u LEFT JOIN provider_profiles pp ON pp."userId"=u.id '
+        'WHERE u.id=:uid LIMIT 1'
+    ), {"uid": user_id}).mappings().first()
+    if not row:
+        raise HTTPException(404, "User not found")
+    data = dict(row)
+    # fetch jobs if customer
+    jobs = []
+    if data.get("role") == "customer":
+        cp = db.execute(text('SELECT id FROM customer_profiles WHERE "userId"=:u LIMIT 1'), {"u": user_id}).mappings().first()
+        if cp:
+            jrows = db.execute(text('SELECT id,title,status,"createdAt",location,budget FROM jobs WHERE "customerId"=:c ORDER BY "createdAt" DESC'), {"c": cp["id"]}).mappings().all()
+            jobs = [dict(j) for j in jrows]
+    # fetch reviews if provider
+    reviews = []
+    if data.get("role") == "provider":
+        pp = db.execute(text('SELECT id FROM provider_profiles WHERE "userId"=:u LIMIT 1'), {"u": user_id}).mappings().first()
+        if pp:
+            rrows = db.execute(text(
+                'SELECT r.*, u.name as "customerName" FROM reviews r '
+                'JOIN customer_profiles cp ON r."customerId"=cp.id '
+                'JOIN users u ON cp."userId"=u.id '
+                'WHERE r."providerId"=:p ORDER BY r."createdAt" DESC'
+            ), {"p": pp["id"]}).mappings().all()
+            reviews = [dict(r) for r in rrows]
+    return {**data, "jobs": jobs, "reviews": reviews}
+
+
 @router.get("/me")
 def get_my_profile(request: Request, db: Session = Depends(get_db)):
     user = require_user(request)
@@ -107,7 +157,10 @@ async def update_my_profile(
         profile_params["website"] = website
 
     if profile_updates:
-        db.execute(text(f'UPDATE provider_profiles SET {", ".join(profile_updates)} WHERE "userId" = :uid'), profile_params)
+        # Only update provider_profiles if the user is actually a provider
+        user_row2 = db.execute(text('SELECT role FROM users WHERE id=:uid LIMIT 1'), {"uid": user["sub"]}).mappings().first()
+        if user_row2 and user_row2["role"] == "provider":
+            db.execute(text(f'UPDATE provider_profiles SET {", ".join(profile_updates)} WHERE "userId" = :uid'), profile_params)
 
     db.commit()
     refreshed = db.execute(

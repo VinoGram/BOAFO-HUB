@@ -103,24 +103,40 @@ export default function Login() {
   ];
   const [selectedDistricts, setSelectedDistricts] = useState<string[]>([]);
   
+  const [paystackRef, setPaystackRef] = useState(new Date().getTime().toString());
+  const [pendingPlan, setPendingPlan] = useState<"Gold" | "Diamond" | null>(null);
+
   const paystackConfig = {
-    reference: new Date().getTime().toString(),
-    email: email,
-    amount: plan === "Gold" ? 5000 : plan === "Diamond" ? 10000 : 0, // Amount in kobo (50 GHS for Gold, 100 GHS for Diamond)
+    reference: paystackRef,
+    email: email || "provider@boafo.app",
+    amount: pendingPlan === "Gold" ? 5000 : pendingPlan === "Diamond" ? 10000 : 0,
     publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "YOUR_PAYSTACK_PUBLIC_KEY",
   };
 
-  const onPaymentSuccess = (reference: any) => {
-    console.log("Payment successful", reference);
-    // After successful payment, proceed with registration
-    if (step === 'phone-entry') {
-      handleSendOTP(true); // Pass a flag to indicate payment was made
-    } else if (step === 'email-form') {
-      handleEmailAuth(undefined, true); // Pass a flag to indicate payment was made
-    }
-  };
-
   const initializePayment = usePaystackPayment(paystackConfig);
+
+  function handlePlanClick(p: "Premium" | "Gold" | "Diamond") {
+    if (p === "Premium") {
+      setPlan("Premium");
+      setSelectedDistricts([]);
+      return;
+    }
+    // Trigger Paystack immediately when Gold or Diamond is clicked
+    setPendingPlan(p);
+    setPaystackRef(new Date().getTime().toString());
+    setTimeout(() => {
+      initializePayment({
+        onSuccess: () => {
+          setPlan(p);
+          setSelectedDistricts([]);
+          setError("");
+        },
+        onClose: () => {
+          setError("Payment cancelled. Please complete payment to select this plan.");
+        },
+      });
+    }, 50); // small delay so paystackConfig picks up the new ref/amount
+  }
 
 
   const { data: me, isLoading: meLoading } = useQuery({
@@ -133,7 +149,7 @@ export default function Login() {
 
   useEffect(() => {
     if (meLoading) return;
-    if (me?.id) navigate(me.role === "provider" ? "/dashboard/provider" : "/dashboard/customer");
+    if (me?.id) navigate("/dashboard");
   }, [me, meLoading]);
 
   useEffect(() => {
@@ -190,16 +206,7 @@ export default function Login() {
       return;
     }
 
-    // If it's a paid plan and payment hasn't been made, initiate payment
-    if (role === 'provider' && (plan === 'Gold' || plan === 'Diamond') && !paymentSuccessful) {
-      initializePayment({
-        onSuccess: onPaymentSuccess,
-        onClose: () => {
-          setError("Payment was closed or failed. Please try again.");
-        },
-      });
-      return;
-    }
+    // Payment is now handled at plan selection time; proceed directly
 
     setError("");    setLoading(true);
     try {
@@ -238,9 +245,7 @@ export default function Login() {
       }
       if (res.token) setToken(res.token);
       qc.setQueryData(["auth", "me"], res.user);
-      navigate(
-        res.user.role === "provider" ? "/dashboard/provider" : "/dashboard/customer"
-      );
+      navigate("/dashboard");
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -270,9 +275,7 @@ export default function Login() {
         });
       if (res.token) setToken(res.token);
       qc.setQueryData(["auth", "me"], res.user);
-      navigate(
-        res.user.role === "provider" ? "/dashboard/provider" : "/dashboard/customer"
-      );
+      navigate("/dashboard");
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -284,16 +287,7 @@ export default function Login() {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
     setError("");
 
-    // If it's a paid plan and payment hasn't been made, initiate payment
-    if (authMode === 'register' && role === 'provider' && (plan === 'Gold' || plan === 'Diamond') && !paymentSuccessful) {
-      initializePayment({
-        onSuccess: onPaymentSuccess,
-        onClose: () => {
-          setError("Payment was closed or failed. Please try again.");
-        },
-      });
-      return;
-    }
+    // Payment is now handled at plan selection time; proceed directly
 
     setLoading(true);
     try {
@@ -309,7 +303,7 @@ export default function Login() {
             if (role === "provider") {
               if (plan) formData.append("plan", plan);
               if (selectedDistricts.length > 0) {
-                selectedDistricts.forEach(district => formData.append("districts", district));
+                formData.append("districts", selectedDistricts.join(","));
               }
             }
             if (profilePicture) {
@@ -320,9 +314,7 @@ export default function Login() {
 
       if (res.token) setToken(res.token);
       qc.setQueryData(["auth", "me"], res.user);
-      navigate(
-        res.user.role === "provider" ? "/dashboard/provider" : "/dashboard/customer"
-      );
+      navigate("/dashboard");
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -397,11 +389,14 @@ export default function Login() {
     console.log(emojiData.emoji);
   }
 
+  const PLAN_LIMITS: Record<string, number> = { Premium: 2, Gold: 8, Diamond: 16 };
+
   const handleDistrictChange = (district: string) => {
     setSelectedDistricts(prev => {
       if (prev.includes(district)) return prev.filter(d => d !== district);
-      if (plan === 'Premium' && prev.length >= 2) {
-        setError("Premium plan allows a maximum of 2 regions.");
+      const limit = PLAN_LIMITS[plan] ?? 2;
+      if (prev.length >= limit) {
+        setError(`${plan} plan allows a maximum of ${limit} region${limit === 1 ? "" : "s"}.`);
         return prev;
       }
       setError("");
@@ -463,7 +458,7 @@ export default function Login() {
       </div>
 
       {/* ── Form panel ── */}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#FFF8EE", padding: "1rem" }}>
+      <div className="login-neo" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#EEE8DF", padding: "1rem" }}>
         <div style={{ width: "100%", maxWidth: 440, padding: "2.5rem 2rem", ...P }}>
           {/* Logo */}
           <Link href="/" style={{ display: "flex", alignItems: "center", gap: "0.5rem", textDecoration: "none", marginBottom: "1.5rem" }}>
@@ -487,7 +482,7 @@ export default function Login() {
                 How would you like to continue?
               </p>
 
-              <div style={{ display: "flex", background: "#F5EDD8", borderRadius: "0.75rem", padding: 4, marginBottom: "1.5rem" }}>
+              <div style={{ display: "flex", background: "#EEE8DF", borderRadius: "0.75rem", padding: 4, marginBottom: "1.5rem", boxShadow: "inset 4px 4px 10px #d4cec6, inset -4px -4px 10px #ffffff" }}>
                 {(["customer", "provider"] as Role[]).map((r) => (
                   <button
                     key={r}
@@ -501,9 +496,9 @@ export default function Login() {
                       fontWeight: 600,
                       fontSize: "0.875rem",
                       transition: "all 0.2s",
-                      background: role === r ? "#fff" : "transparent",
+                      background: role === r ? "#EEE8DF" : "transparent",
                       color: role === r ? "#473C33" : "#6B5B4E",
-                      boxShadow: role === r ? "0 2px 8px rgba(71,60,51,0.1)" : "none",
+                      boxShadow: role === r ? "6px 6px 16px #d4cec6, -6px -6px 16px #ffffff" : "none",
                     }}
                   >
                     {r === "customer" ? "I need services" : "I offer services"}
@@ -519,8 +514,7 @@ export default function Login() {
                 Continue with Phone (SMS OTP)
               </button>
               <button
-                className="btn-boafo btn-outline"
-                style={{ width: "100%", justifyContent: "center", fontSize: "0.9375rem", padding: "0.8rem" }}
+                style={{ width: "100%", justifyContent: "center", fontSize: "0.9375rem", padding: "0.8rem", background: "#EEE8DF", border: "none", borderRadius: "0.75rem", fontWeight: 600, color: "#473C33", cursor: "pointer", boxShadow: "6px 6px 16px #d4cec6, -6px -6px 16px #ffffff", display: "flex", alignItems: "center" }}
                 onClick={() => {
                   setAuthMode("login");
                   setStep("email-form");
@@ -548,7 +542,7 @@ export default function Login() {
               <label className="boafo-label">Phone Number</label>
               <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.375rem" }}>
                 <span
-                  style={{ background: "#F5EDD8", border: "1.5px solid #E8D9BF", borderRadius: "0.75rem", padding: "0.75rem 1rem", fontWeight: 600, color: "#473C33", fontSize: "0.9rem", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "0.5rem" }}
+                  style={{ background: "#EEE8DF", boxShadow: "inset 4px 4px 10px #d4cec6, inset -4px -4px 10px #ffffff", border: "none", borderRadius: "0.75rem", padding: "0.75rem 1rem", fontWeight: 600, color: "#473C33", fontSize: "0.9rem", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "0.5rem" }}
                 >
                   <svg width="20" height="15" viewBox="0 0 20 15">
                     <rect width="20" height="15" fill="#006B3F"/>
@@ -580,19 +574,21 @@ export default function Login() {
                       <button
                         key={p}
                         type="button"
-                        onClick={() => setPlan(p)}
+                        onClick={() => handlePlanClick(p)}
                         style={{
                           borderRadius: 12,
-                          border: `2px solid ${plan === p ? "#ABC270" : "#E8D9BF"}`,
-                          background: plan === p ? "#F5FFE8" : "#fff",
+                          border: "none",
+                          background: "#EEE8DF",
+                          boxShadow: plan === p ? "inset 4px 4px 10px #d4cec6, inset -4px -4px 10px #ffffff" : "6px 6px 16px #d4cec6, -6px -6px 16px #ffffff",
                           padding: "0.9rem 0.85rem",
                           textAlign: "left",
                           cursor: "pointer",
+                          outline: plan === p ? "2px solid #ABC270" : "none",
                         }}
                       >
-                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{p}</div>
+                        <div style={{ fontWeight: 700, marginBottom: 4, color: "#473C33" }}>{p}</div>
                         <div style={{ fontSize: "0.78rem", color: "#6B5B4E" }}>
-                          {p === "Premium" ? "Free, 2 districts coverage" : p === "Gold" ? "Paid, more districts" : "All districts + full access"}
+                          {p === "Premium" ? "Free · 2 regions" : p === "Gold" ? "GH₵50 · 8 regions" : "GH₵100 · All regions"}
                         </div>
                       </button>
                     ))}
@@ -602,8 +598,8 @@ export default function Login() {
 
               {role === "provider" && (
                 <div style={{ marginBottom: "1.5rem" }}>
-                  <label className="boafo-label">Select your operational regions</label>
-                  {plan !== 'Premium' && (
+                  <label className="boafo-label">Select your operational regions ({selectedDistricts.length}/{PLAN_LIMITS[plan]})</label>
+                  {plan === "Diamond" && (
                     <div style={{ marginBottom: '0.5rem' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                         <input
@@ -615,9 +611,9 @@ export default function Login() {
                       </label>
                     </div>
                   )}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', border: '1px solid #E8D9BF', borderRadius: '12px', padding: '1rem', background: '#fff' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', borderRadius: '12px', padding: '1rem', background: "#EEE8DF", boxShadow: "inset 4px 4px 10px #d4cec6, inset -4px -4px 10px #ffffff" }}>
                     {GHANA_REGIONS.map(r => (
-                      <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem' }}>
+                      <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem', color: '#473C33' }}>
                         <input type="checkbox" value={r} checked={selectedDistricts.includes(r)} onChange={() => handleDistrictChange(r)} />
                         {r}
                       </label>
@@ -662,9 +658,7 @@ export default function Login() {
                   return otp.map((d, i) => (
                     <input
                       key={i}
-                      ref={(el) => {
-                        otpRefs.current[i] = el;
-                      }}
+                      ref={(el) => { otpRefs.current[i] = el; }}
                       type="text"
                       inputMode="numeric"
                       maxLength={1}
@@ -679,12 +673,13 @@ export default function Login() {
                         textAlign: "center",
                         fontSize: "1.5rem",
                         fontWeight: 700,
-                        border: `2px solid ${d ? "#ABC270" : "#E8D9BF"}`,
+                        border: "none",
                         borderRadius: "0.75rem",
-                        background: "#fff",
+                        background: "#EEE8DF",
                         color: "#473C33",
-                        outline: "none",
-                        transition: "border-color 0.2s, transform 0.2s",
+                        outline: d ? "2px solid #ABC270" : "none",
+                        boxShadow: d ? "inset 4px 4px 10px #d4cec6, inset -4px -4px 10px #ffffff" : "6px 6px 16px #d4cec6, -6px -6px 16px #ffffff",
+                        transition: "box-shadow 0.2s",
                         animationDelay: `${i * 35}ms`,
                       }}
                     />
@@ -762,7 +757,7 @@ export default function Login() {
                 ← Back
               </button>
 
-              <div style={{ display: "flex", background: "#F5EDD8", borderRadius: "0.75rem", padding: 4, marginBottom: "1.75rem" }}>
+              <div style={{ display: "flex", background: "#EEE8DF", borderRadius: "0.75rem", padding: 4, marginBottom: "1.75rem", boxShadow: "inset 4px 4px 10px #d4cec6, inset -4px -4px 10px #ffffff" }}>
                 {(["login", "register"] as const).map((m) => (
                   <button
                     key={m}
@@ -776,9 +771,9 @@ export default function Login() {
                       fontWeight: 600,
                       fontSize: "0.875rem",
                       transition: "all 0.2s",
-                      background: authMode === m ? "#fff" : "transparent",
+                      background: authMode === m ? "#EEE8DF" : "transparent",
                       color: authMode === m ? "#473C33" : "#6B5B4E",
-                      boxShadow: authMode === m ? "0 2px 8px rgba(71,60,51,0.1)" : "none",
+                      boxShadow: authMode === m ? "6px 6px 16px #d4cec6, -6px -6px 16px #ffffff" : "none",
                     }}
                   >
                     {m === "login" ? "Sign In" : "Create Account"}
@@ -888,19 +883,21 @@ export default function Login() {
                             <button
                               key={p}
                               type="button"
-                              onClick={() => setPlan(p)}
+                              onClick={() => handlePlanClick(p)}
                               style={{
                                 borderRadius: 12,
-                                border: `2px solid ${plan === p ? "#ABC270" : "#E8D9BF"}`,
-                                background: plan === p ? "#F5FFE8" : "#fff",
+                                border: "none",
+                                background: "#EEE8DF",
+                                boxShadow: plan === p ? "inset 4px 4px 10px #d4cec6, inset -4px -4px 10px #ffffff" : "6px 6px 16px #d4cec6, -6px -6px 16px #ffffff",
                                 padding: "0.9rem 0.85rem",
                                 textAlign: "left",
                                 cursor: "pointer",
+                                outline: plan === p ? "2px solid #ABC270" : "none",
                               }}
                             >
-                              <div style={{ fontWeight: 700, marginBottom: 4 }}>{p}</div>
+                              <div style={{ fontWeight: 700, marginBottom: 4, color: "#473C33" }}>{p}</div>
                               <div style={{ fontSize: "0.78rem", color: "#6B5B4E" }}>
-                                {p === "Premium" ? "Free, 2 districts coverage" : p === "Gold" ? "Paid, more districts" : "All districts + full access"}
+                                {p === "Premium" ? "Free · 2 regions" : p === "Gold" ? "GH₵50 · 8 regions" : "GH₵100 · All regions"}
                               </div>
                             </button>
                           ))}
@@ -909,8 +906,8 @@ export default function Login() {
                     )}
                     {role === "provider" && (
                       <div>
-                        <label className="boafo-label">Select your operational regions</label>
-                        {plan !== 'Premium' && (
+                        <label className="boafo-label">Select your operational regions ({selectedDistricts.length}/{PLAN_LIMITS[plan]})</label>
+                        {plan === "Diamond" && (
                           <div style={{ marginBottom: '0.5rem' }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                               <input
@@ -922,9 +919,9 @@ export default function Login() {
                             </label>
                           </div>
                         )}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', border: '1px solid #E8D9BF', borderRadius: '12px', padding: '1rem', background: '#fff' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', borderRadius: '12px', padding: '1rem', background: "#EEE8DF", boxShadow: "inset 4px 4px 10px #d4cec6, inset -4px -4px 10px #ffffff" }}>
                           {GHANA_REGIONS.map(r => (
-                            <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem' }}>
+                            <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem', color: '#473C33' }}>
                               <input type="checkbox" value={r} checked={selectedDistricts.includes(r)} onChange={() => handleDistrictChange(r)} />
                               {r}
                             </label>

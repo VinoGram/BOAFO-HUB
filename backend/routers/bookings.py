@@ -101,7 +101,7 @@ def accept_booking(booking_id: int, request: Request, db: Session = Depends(get_
     if not booking:
         raise HTTPException(404, "Not found")
     provider = crud.get_provider_profile_by_id(db, booking["providerId"])
-    if not provider or provider["userId"] != user["sub"]:
+    if not provider or int(provider["userId"]) != int(user["sub"]):
         raise HTTPException(403, "Forbidden")
     crud.update_booking_status(db, booking_id, "accepted")
     job = crud.get_job_by_id(db, booking["jobId"])
@@ -127,7 +127,7 @@ def decline_booking(booking_id: int, body: DeclineBooking, request: Request, db:
     if not booking:
         raise HTTPException(404, "Not found")
     provider = crud.get_provider_profile_by_id(db, booking["providerId"])
-    if not provider or provider["userId"] != user["sub"]:
+    if not provider or int(provider["userId"]) != int(user["sub"]):
         raise HTTPException(403, "Forbidden")
     crud.update_booking_status(db, booking_id, "declined")
     job = crud.get_job_by_id(db, booking["jobId"])

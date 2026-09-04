@@ -52,6 +52,7 @@ class CreateProviderProfile(BaseModel):
     serviceAreaLongitude: Optional[str] = None
     serviceRegions: Optional[List[str]] = None
     phone: Optional[str] = None
+    plan: Optional[str] = "Premium"
 
 
 class UpdateProviderProfile(BaseModel):
@@ -269,6 +270,7 @@ def create_profile(body: CreateProviderProfile, request: Request, db: Session = 
         "serviceAreaRadius": body.serviceAreaRadius,
         "serviceAreaLatitude": float(body.serviceAreaLatitude) if body.serviceAreaLatitude else None,
         "serviceAreaLongitude": float(body.serviceAreaLongitude) if body.serviceAreaLongitude else None,
+        "plan": body.plan or "Premium",
         "serviceRegions": body.serviceRegions or [],
     })
 
@@ -287,7 +289,9 @@ def update_profile(body: UpdateProviderProfile, request: Request, db: Session = 
     if "serviceRegions" in updates:
         plan = profile.get("plan", "Premium")
         regions = updates["serviceRegions"] or []
-        if plan != "Diamond" and len(regions) > 2:
-            raise HTTPException(400, "Only Diamond providers can select more than 2 Ghana regions")
+        limits = {"Premium": 2, "Gold": 8, "Diamond": 16}
+        limit = limits.get(plan, 2)
+        if plan != "Diamond" and len(regions) > limit:
+            raise HTTPException(400, f"{plan} plan allows a maximum of {limit} regions")
         updates["serviceRegions"] = regions
     return crud.update_provider_profile(db, profile["id"], updates)

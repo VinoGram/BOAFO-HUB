@@ -40,9 +40,9 @@ def create_review(body: CreateReview, request: Request, db: Session = Depends(ge
     if not booking or booking["customerId"] != profile["id"]:
         raise HTTPException(403, "Forbidden")
 
-    # Enforce: booking must be completed
-    if booking.get("status") != "completed":
-        raise HTTPException(400, "You can only review completed jobs")
+    # Enforce: booking must be completed or in_progress (provider didn't finish)
+    if booking.get("status") not in ("completed", "in_progress", "accepted"):
+        raise HTTPException(400, "You can only review active or completed jobs")
 
     # Enforce: exactly one review per booking
     existing = db.execute(
